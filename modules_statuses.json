@@ -4,5 +4,7 @@
     "Order": true,
     "Product": true,
     "Language": true,
-    "Currency": true
+    "Currency": true,
+    "City": true,
+    "Menu": true
 }
