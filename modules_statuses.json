@@ -1,0 +1,8 @@
+{
+    "Payment": true,
+    "User": true,
+    "Order": true,
+    "Product": true,
+    "Language": true,
+    "Currency": true
+}
