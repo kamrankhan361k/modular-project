@@ -2,55 +2,88 @@
 
 namespace Modules\Payment\Http\Controllers;
 
-use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Controller;
+use Modules\Payment\Services\PaymentService;
+use Modules\Payment\Http\Requests\ProcessPaymentRequest;
 
 class PaymentController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
-    public function index()
+    private $paymentService;
+
+    public function __construct(PaymentService $paymentService)
     {
-        return view('payment::index');
+        $this->paymentService = $paymentService;
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
+    public function showCheckoutForm()
     {
-        return view('payment::create');
+        $gateways = $this->paymentService->getSupportedGateways();
+
+        return view('payment::checkout', compact('gateways'));
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
-    public function store(Request $request) {}
-
-    /**
-     * Show the specified resource.
-     */
-    public function show($id)
+    public function processPayment(ProcessPaymentRequest $request)
     {
-        return view('payment::show');
+        $paymentData = $request->validated();
+        $paymentData['user_id'] = auth()->id();
+        $paymentData['ip_address'] = $request->ip();
+        $paymentData['user_agent'] = $request->userAgent();
+
+        $result = $this->paymentService->processPayment($paymentData);
+
+        if ($result['status'] === 'success') {
+            if (isset($result['redirect_url'])) {
+                return redirect()->away($result['redirect_url']);
+            }
+
+            if (isset($result['checkout_data'])) {
+                return view('payment::gateways.razorpay', [
+                    'checkout_data' => $result['checkout_data']
+                ]);
+            }
+
+            return redirect()->route('payment.success', [
+                'gateway' => $paymentData['gateway'],
+                'transaction_id' => $result['transaction']->transaction_id
+            ]);
+        }
+
+        return back()->with('error', $result['error'] ?? 'Payment processing failed');
     }
 
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit($id)
+    public function paymentSuccess(Request $request, string $gateway)
     {
-        return view('payment::edit');
+        $transactionId = $request->get('transaction_id');
+
+        if ($transactionId) {
+            $verification = $this->paymentService->verifyPayment($gateway, [
+                'transaction_id' => $transactionId
+            ]);
+
+            if ($verification['status'] === 'success') {
+                return view('payment::success', [
+                    'transaction' => $verification['transaction']
+                ]);
+            }
+        }
+
+        return view('payment::success');
     }
 
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, $id) {}
+    public function paymentCancel(string $gateway)
+    {
+        return view('payment::cancel');
+    }
 
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy($id) {}
+    public function paymentWebhook(Request $request, string $gateway)
+    {
+        $result = $this->paymentService->handleWebhook($gateway, $request->all());
+
+        if ($result['status'] === 'success') {
+            return response()->json(['status' => 'success']);
+        }
+
+        return response()->json(['status' => 'failed'], 400);
+    }
 }
